@@ -304,10 +304,15 @@ func (j *Jira) CreateIssue(fields map[string]any) (string, error) {
 	return r.Key, nil
 }
 
-func (j *Jira) AddWorklog(key string, minutes int, started time.Time) error {
+func (j *Jira) AddWorklog(key string, minutes int, started time.Time, comment string) error {
 	body := map[string]any{
 		"timeSpentSeconds": minutes * 60,
 		"started":          started.Format("2006-01-02T15:04:05.000-0700"),
+	}
+	if comment != "" {
+		body["comment"] = map[string]any{"type": "doc", "version": 1, "content": []any{
+			map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": comment}}},
+		}}
 	}
 	return j.do("POST", "/rest/api/3/issue/"+url.PathEscape(key)+"/worklog", nil, body, nil)
 }

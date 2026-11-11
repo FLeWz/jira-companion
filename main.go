@@ -152,9 +152,11 @@ func (a *app) handleUsers(w http.ResponseWriter, r *http.Request) {
 // ---- day ----
 
 type EntryDTO struct {
+	ID      string `json:"id"`
 	Key     string `json:"key"`
 	Summary string `json:"summary"`
 	Time    string `json:"time"`
+	Comment string `json:"comment"`
 	Logged  bool   `json:"logged"`
 }
 
@@ -170,7 +172,7 @@ type DayDTO struct {
 func (a *app) dto(warning string) DayDTO {
 	d := DayDTO{Date: a.st.S.Date, Workday: FormatMinutes(a.st.S.WorkdayMin), Remember: a.st.S.Remember, Warning: warning, Entries: []EntryDTO{}}
 	for _, e := range a.st.S.Entries {
-		d.Entries = append(d.Entries, EntryDTO{e.Key, e.Summary, FormatMinutes(e.Minutes), e.Logged})
+		d.Entries = append(d.Entries, EntryDTO{e.ID, e.Key, e.Summary, FormatMinutes(e.Minutes), e.Comment, e.Logged})
 	}
 	return d
 }
@@ -187,7 +189,7 @@ func (a *app) mergeMine() error {
 	}
 	for _, i := range issues {
 		if !have[i.Key] {
-			a.st.S.Entries = append(a.st.S.Entries, Entry{Key: i.Key, Summary: i.Summary})
+			a.st.S.Entries = append(a.st.S.Entries, Entry{ID: NewID(), Key: i.Key, Summary: i.Summary})
 		}
 	}
 	a.st.S.Loaded = true
@@ -234,11 +236,11 @@ func (a *app) handleDayPut(w http.ResponseWriter, r *http.Request) {
 	a.st.Rollover()
 	old := map[string]Entry{}
 	for _, e := range a.st.S.Entries {
-		old[e.Key] = e
+		old[e.ID] = e
 	}
 	var entries []Entry
 	for _, e := range in.Entries {
-		if prev, ok := old[e.Key]; ok && prev.Logged {
+		if prev, ok := old[e.ID]; ok && e.ID != "" && prev.Logged {
 			entries = append(entries, prev) // logged entries are frozen
 			continue
 		}
@@ -247,7 +249,11 @@ func (a *app) handleDayPut(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, fmt.Errorf("%s: %w", e.Key, err))
 			return
 		}
-		entries = append(entries, Entry{Key: e.Key, Summary: e.Summary, Minutes: m})
+		id := e.ID
+		if id == "" {
+			id = NewID()
+		}
+		entries = append(entries, Entry{ID: id, Key: e.Key, Summary: e.Summary, Minutes: m, Comment: strings.TrimSpace(e.Comment)})
 	}
 	a.st.S.WorkdayMin = wd
 	a.st.S.Entries = entries
@@ -327,7 +333,7 @@ func (a *app) handleComplete(w http.ResponseWriter, r *http.Request) {
 		if st.YearDay() != now.YearDay() || st.Day() != now.Day() {
 			st = time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, now.Location())
 		}
-		if err := a.jira.AddWorklog(e.Key, e.Minutes, st); err != nil {
+		if err := a.jira.AddWorklog(e.Key, e.Minutes, st, e.Comment); err != nil {
 			a.st.Save()
 			writeJSON(w, 502, map[string]any{
 				"error": fmt.Sprintf("%s: %v (%d of %d worklogs saved, retry to continue)", e.Key, err, posted, len(idx)),
@@ -452,7 +458,7 @@ func (a *app) handleCreate(w http.ResponseWriter, r *http.Request) {
 	a.st.Rollover()
 	rm := &a.st.S.Remember
 	rm.Project, rm.Parent, rm.Assignee, rm.Reporter = in.Project, in.Parent, in.Assignee, in.Reporter
-	a.st.S.Entries = append(a.st.S.Entries, Entry{Key: key, Summary: in.Summary})
+	a.st.S.Entries = append(a.st.S.Entries, Entry{ID: NewID(), Key: key, Summary: in.Summary})
 	if err := a.st.Save(); err != nil {
 		log.Printf("save: %v", err)
 	}

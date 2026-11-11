@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -14,9 +16,11 @@ type Ref struct {
 }
 
 type Entry struct {
+	ID      string `json:"id"` // one task can have several entries
 	Key     string `json:"key"`
 	Summary string `json:"summary"`
 	Minutes int    `json:"minutes"`
+	Comment string `json:"comment,omitempty"`
 	Logged  bool   `json:"logged"`
 }
 
@@ -61,6 +65,11 @@ func OpenStore(dir string) (*Store, error) {
 
 // Rollover resets the day part of the state when the date changed. Lock held.
 func (s *Store) Rollover() {
+	for i := range s.S.Entries {
+		if s.S.Entries[i].ID == "" {
+			s.S.Entries[i].ID = NewID()
+		}
+	}
 	today := time.Now().Format("2006-01-02")
 	if s.S.Date != today {
 		s.resetDay()
@@ -86,4 +95,11 @@ func (s *Store) Save() error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// NewID returns a short random id for day entries.
+func NewID() string {
+	b := make([]byte, 6)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

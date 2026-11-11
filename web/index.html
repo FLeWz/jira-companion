@@ -25,12 +25,13 @@
   button.ghost { background:none; color:var(--mut); padding:4px 8px; }
   button.big { width:100%; margin-top:14px; padding:11px; font-weight:600; }
   button.done { background:var(--ok); }
-  .row { display:grid; grid-template-columns:70px 1fr 90px 24px; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); }
+  .row { display:grid; grid-template-columns:90px minmax(0,1fr) minmax(0,1.3fr) 84px 52px; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); }
   .row:first-child { border-top:0; }
   .row a { color:var(--acc); text-decoration:none; font-weight:600; font-size:13px; }
   .row .sum { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .row.logged { opacity:.5; }
-  .row input { text-align:right; }
+  .row input.time { text-align:right; }
+  .row .btns { display:flex; }
   .wd { display:flex; align-items:center; gap:10px; }
   .wd input { width:110px; font-size:18px; text-align:center; }
   .status { margin-top:12px; font-size:13px; color:var(--mut); }
@@ -227,8 +228,10 @@ function updateStatus() {
   btn.disabled = !ok;
 }
 
+const newId = () => (crypto.randomUUID ? crypto.randomUUID().slice(0, 12) : Math.random().toString(16).slice(2, 14));
+
 function payload() {
-  return { workday: $('#workday').value, entries: day.entries.map(e => ({ key: e.key, summary: e.summary, time: e.time })) };
+  return { workday: $('#workday').value, entries: day.entries.map(e => ({ id: e.id, key: e.key, summary: e.summary, time: e.time, comment: e.comment || '' })) };
 }
 
 // Local draft: survives reloads until Complete day succeeds.
@@ -237,7 +240,7 @@ function persist() {
   try {
     localStorage.setItem(DRAFT, JSON.stringify({
       date: day.date, workday: $('#workday').value,
-      entries: day.entries.filter(e => !e.logged).map(e => ({ key: e.key, summary: e.summary, time: e.time })),
+      entries: day.entries.filter(e => !e.logged).map(e => ({ id: e.id, key: e.key, summary: e.summary, time: e.time, comment: e.comment || '' })),
     }));
   } catch {}
 }
@@ -247,9 +250,10 @@ function applyDraft(d) {
   try { dr = JSON.parse(localStorage.getItem(DRAFT) || 'null'); } catch { dr = null; }
   if (!dr || dr.date !== d.date) return false;
   if (typeof dr.workday === 'string') d.workday = dr.workday;
-  const byKey = new Map(dr.entries.map(e => [e.key, e]));
-  for (const e of d.entries) { const l = byKey.get(e.key); if (l && !e.logged) e.time = l.time; }
-  for (const l of dr.entries) if (!d.entries.some(e => e.key === l.key)) d.entries.push({ ...l, logged: false });
+  dr.entries = (dr.entries || []).filter(e => e.id); // ignore pre-id drafts
+  const byId = new Map(dr.entries.map(e => [e.id, e]));
+  for (const e of d.entries) { const l = byId.get(e.id); if (l && !e.logged) { e.time = l.time; e.comment = l.comment || ''; } }
+  for (const l of dr.entries) if (!d.entries.some(e => e.id === l.id)) d.entries.push({ ...l, logged: false });
   return true;
 }
 
@@ -273,21 +277,39 @@ function render() {
     list.innerHTML = '<div class="empty-note">No active tasks. Add one below or create a new task.</div>';
   }
   day.entries.forEach((e, i) => {
+    const first = i === 0 || day.entries[i - 1].key !== e.key;
     const row = document.createElement('div');
     row.className = 'row' + (e.logged ? ' logged' : '');
     const a = document.createElement('a');
-    a.textContent = e.key; a.href = baseUrl + '/browse/' + e.key; a.target = '_blank'; a.rel = 'noopener';
+    if (first) { a.textContent = e.key; a.href = baseUrl + '/browse/' + e.key; a.target = '_blank'; a.rel = 'noopener'; }
     const sm = document.createElement('span');
-    sm.className = 'sum'; sm.textContent = e.summary; sm.title = e.summary;
+    sm.className = 'sum';
+    if (first) { sm.textContent = e.summary; sm.title = e.summary; }
+    const c = document.createElement('input');
+    c.value = e.comment || ''; c.placeholder = 'Description'; c.disabled = e.logged; c.autocomplete = 'off';
+    c.oninput = () => { e.comment = c.value; queueSave(); };
     const t = document.createElement('input');
+    t.className = 'time';
     t.value = e.time; t.placeholder = '0m'; t.disabled = e.logged; t.autocomplete = 'off';
     t.oninput = () => { e.time = t.value; t.classList.toggle('bad', parseDur(t.value) === null); updateStatus(); queueSave(); };
     t.onblur = () => { const v = parseDur(t.value); if (v !== null) { e.time = t.value = fmt(v); updateStatus(); queueSave(); } };
-    t.onkeydown = ev => { if (ev.key === 'Enter') { const n = list.querySelectorAll('.row input:not(:disabled)')[ [...list.querySelectorAll('.row input:not(:disabled)')].indexOf(t) + 1 ]; (n || $('#complete')).focus(); } };
+    const onEnter = ev => { if (ev.key === 'Enter') { const all = [...list.querySelectorAll('.row input:not(:disabled)')]; const n = all[all.indexOf(ev.target) + 1]; (n || $('#complete')).focus(); } };
+    t.onkeydown = c.onkeydown = onEnter;
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    const plus = document.createElement('button');
+    plus.className = 'ghost'; plus.textContent = '+'; plus.title = 'Add another entry for this task';
+    plus.onclick = () => {
+      let last = i; while (last + 1 < day.entries.length && day.entries[last + 1].key === e.key) last++;
+      day.entries.splice(last + 1, 0, { id: newId(), key: e.key, summary: e.summary, time: '', comment: '', logged: false });
+      render(); queueSave();
+      const rows = $('#list').querySelectorAll('.row'); rows[last + 1].querySelector('input').focus();
+    };
     const x = document.createElement('button');
-    x.className = 'ghost'; x.textContent = '×'; x.title = 'Remove from today'; x.disabled = e.logged;
+    x.className = 'ghost'; x.textContent = '×'; x.title = 'Remove this entry'; x.disabled = e.logged;
     x.onclick = () => { day.entries.splice(i, 1); render(); queueSave(); };
-    row.append(a, sm, t, x);
+    btns.append(plus, x);
+    row.append(a, sm, c, t, btns);
     list.append(row);
   });
   updateStatus();
@@ -320,7 +342,7 @@ const addCombo = Combo($('#addtask'), {
     if (!it) return;
     addCombo.set(null);
     if (!day.entries.some(e => e.key === it.key)) {
-      day.entries.push({ key: it.key, summary: it.summary, time: '', logged: false });
+      day.entries.push({ id: newId(), key: it.key, summary: it.summary, time: '', comment: '', logged: false });
       render(); queueSave();
     }
   },
