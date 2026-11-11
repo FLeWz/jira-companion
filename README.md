@@ -2,6 +2,8 @@
 
 Localhost-only Jira Cloud helper: log the day's hours, create tasks fast.
 
+![jira-companion interface](interface.png)
+
 ## Run
 
     cp .env.example .env     # fill JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN
