@@ -8,10 +8,10 @@
   :root { --bg:#f4f5f7; --card:#fff; --line:#dfe1e6; --txt:#172b4d; --mut:#6b778c; --acc:#0c66e4; --ok:#1f845a; --warn:#b65c02; --bad:#c9372c; }
   * { box-sizing: border-box; }
   body { margin:0; font:15px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
-  header { display:flex; justify-content:space-between; align-items:baseline; max-width:1000px; margin:0 auto; padding:16px 16px 0; }
+  header { display:flex; justify-content:space-between; align-items:baseline; max-width:1600px; margin:0 auto; padding:16px 16px 0; }
   header h1 { font-size:20px; margin:0; }
   #me { color:var(--mut); }
-  main { max-width:1000px; margin:0 auto; padding:16px; display:grid; gap:16px; grid-template-columns:1fr 1fr; align-items:start; }
+  main { max-width:1600px; margin:0 auto; padding:16px; display:grid; gap:16px; grid-template-columns:1fr 1fr; align-items:start; }
   @media (max-width:820px) { main { grid-template-columns:1fr; } }
   section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
   h2 { font-size:16px; margin:0 0 12px; display:flex; justify-content:space-between; align-items:baseline; }
@@ -56,7 +56,7 @@
   #weeks { overflow-x:auto; }
   #wtables table { font-size:13px; }
   #wtables th, #wtables td { padding:6px 4px; }
-  #wtables td:first-child { max-width:220px; min-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #wtables td:first-child { max-width:520px; min-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .empty-note { color:var(--mut); padding:8px 0; }
 </style>
 </head>
