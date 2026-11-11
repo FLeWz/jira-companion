@@ -55,8 +55,10 @@
   tfoot td { font-weight:600; }
   #weeks { overflow-x:auto; }
   #wtables table { font-size:13px; }
-  #wtables th, #wtables td { padding:6px 4px; }
-  #wtables td:first-child { max-width:520px; min-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #wtables th, #wtables td { padding:7px 10px; }
+  #wtables td.n, #wtables th.n { width:auto; }
+  #wtables table { table-layout:fixed; min-width:960px; }
+  #wtables th:first-child, #wtables td:first-child { width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .empty-note { color:var(--mut); padding:8px 0; }
 </style>
 </head>
