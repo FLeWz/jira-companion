@@ -52,6 +52,7 @@ func main() {
 	mux.HandleFunc("GET /api/day", a.handleDayGet)
 	mux.HandleFunc("PUT /api/day", a.handleDayPut)
 	mux.HandleFunc("POST /api/day/refresh", a.handleRefresh)
+	mux.HandleFunc("POST /api/day/preview", a.handlePreview)
 	mux.HandleFunc("POST /api/day/complete", a.handleComplete)
 	mux.HandleFunc("POST /api/tasks", a.handleCreate)
 	mux.HandleFunc("GET /api/weeks", a.handleWeeks)
@@ -271,42 +272,92 @@ type completeResp struct {
 	Day      DayDTO `json:"day"`
 }
 
-func (a *app) handleComplete(w http.ResponseWriter, r *http.Request) {
-	a.st.Lock()
-	defer a.st.Unlock()
-	a.st.Rollover()
-	s := &a.st.S
+// planDay computes what Complete day would log: indices of entries to post and
+// their (possibly auto-adjusted) minutes. Does not modify state.
+func planDay(s *State) (idx, planned []int, adjusted bool, err error) {
 	if s.WorkdayMin <= 0 {
-		writeErr(w, 400, errors.New("set work day hours first"))
-		return
+		return nil, nil, false, errors.New("set work day hours first")
 	}
-	loaded := 0
-	var idx, mins []int
+	logged := 0
+	var mins []int
 	for i, e := range s.Entries {
 		switch {
 		case e.Logged:
-			loaded += e.Minutes
+			logged += e.Minutes
 		case e.Minutes > 0:
 			idx = append(idx, i)
 			mins = append(mins, e.Minutes)
 		}
 	}
 	if len(idx) == 0 {
-		writeErr(w, 400, errors.New("enter time on at least one task"))
-		return
+		return nil, nil, false, errors.New("enter time on at least one task")
 	}
-	target := s.WorkdayMin - loaded
+	target := s.WorkdayMin - logged
 	if target <= 0 {
-		writeErr(w, 400, errors.New("already logged more than the work day"))
-		return
+		return nil, nil, false, errors.New("already logged more than the work day")
 	}
 	sum := 0
 	for _, m := range mins {
 		sum += m
 	}
-	adjusted := sum != target
+	if sum == target {
+		return idx, mins, false, nil
+	}
+	return idx, Adjust(mins, target), true, nil
+}
+
+type previewItem struct {
+	Key      string `json:"key"`
+	Summary  string `json:"summary"`
+	Comment  string `json:"comment"`
+	Time     string `json:"time"`     // what will be logged
+	Original string `json:"original"` // what was entered
+}
+
+type previewResp struct {
+	Adjusted bool          `json:"adjusted"`
+	Workday  string        `json:"workday"`
+	Total    string        `json:"total"`
+	Items    []previewItem `json:"items"`
+}
+
+// handlePreview returns the worklogs Complete day would post, without posting.
+func (a *app) handlePreview(w http.ResponseWriter, r *http.Request) {
+	a.st.Lock()
+	defer a.st.Unlock()
+	a.st.Rollover()
+	s := &a.st.S
+	idx, planned, adjusted, err := planDay(s)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	out := previewResp{Adjusted: adjusted, Workday: FormatMinutes(s.WorkdayMin), Items: []previewItem{}}
+	total := 0
+	for k, i := range idx {
+		if planned[k] == 0 {
+			continue
+		}
+		e := s.Entries[i]
+		total += planned[k]
+		out.Items = append(out.Items, previewItem{e.Key, e.Summary, e.Comment, FormatMinutes(planned[k]), FormatMinutes(e.Minutes)})
+	}
+	out.Total = FormatMinutes(total)
+	writeJSON(w, 200, out)
+}
+
+func (a *app) handleComplete(w http.ResponseWriter, r *http.Request) {
+	a.st.Lock()
+	defer a.st.Unlock()
+	a.st.Rollover()
+	s := &a.st.S
+	idx, planned, adjusted, err := planDay(s)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
 	if adjusted {
-		for k, v := range Adjust(mins, target) {
+		for k, v := range planned {
 			s.Entries[idx[k]].Minutes = v
 		}
 	}
