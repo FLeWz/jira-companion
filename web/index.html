@@ -4,13 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jira-companion</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem("jira-companion-theme") === "dark" ? "dark" : "light"; } catch { document.documentElement.dataset.theme = "light"; }</script>
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <style>
-  :root { --bg:#f4f5f7; --card:#fff; --line:#dfe1e6; --txt:#172b4d; --mut:#6b778c; --acc:#0c66e4; --ok:#1f845a; --warn:#b65c02; --bad:#c9372c; }
+  :root { color-scheme:light; --bg:#f4f5f7; --card:#fff; --line:#dfe1e6; --txt:#172b4d; --mut:#6b778c; --acc:#0c66e4; --ok:#1f845a; --warn:#b65c02; --bad:#c9372c;
+          --okbg:#1f845a; --badbg:#c9372c; --inp:#fff; --pop:#fff; --hov:#e9f2ff; --tot:#f7f8f9; --shadow:#0002; --scrim:#0008; }
+  :root[data-theme=dark] { color-scheme:dark; --bg:#161a1d; --card:#1d2125; --line:#38414a; --txt:#c7d1db; --mut:#8c9bab; --acc:#1d7afc; --ok:#4bce97; --warn:#f5a04a; --bad:#f87168;
+          --okbg:#1f845a; --badbg:#c9372c; --inp:#22272b; --pop:#282e33; --hov:#2b3a4d; --tot:#22272b; --shadow:#0008; --scrim:#000a; }
   * { box-sizing: border-box; }
   body { margin:0; font:15px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
   header { display:flex; justify-content:space-between; align-items:baseline; max-width:1600px; margin:0 auto; padding:16px 16px 0; }
   header h1 { font-size:20px; margin:0; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  #theme { border:1px solid var(--line); padding:3px 10px; font-size:13px; }
   #me { color:var(--mut); }
   main { max-width:1600px; margin:0 auto; padding:16px; display:grid; gap:16px; grid-template-columns:1.3fr 1fr; align-items:start; }
   @media (max-width:820px) { main { grid-template-columns:1fr; } }
@@ -18,14 +24,14 @@
   h2 { font-size:16px; margin:0 0 12px; display:flex; justify-content:space-between; align-items:baseline; }
   h2 small { font-weight:normal; color:var(--mut); }
   label { display:block; font-size:12px; color:var(--mut); margin:10px 0 3px; }
-  input { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; color:inherit; }
+  input { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font:inherit; background:var(--inp); color:inherit; }
   input:focus { outline:2px solid var(--acc); outline-offset:-1px; }
   input.bad { border-color:var(--bad); }
   button { font:inherit; padding:8px 14px; border:0; border-radius:6px; background:var(--acc); color:#fff; cursor:pointer; }
   button:disabled { opacity:.45; cursor:default; }
   button.ghost { background:none; color:var(--mut); padding:4px 8px; }
   button.big { width:100%; margin-top:14px; padding:11px; font-weight:600; }
-  button.done { background:var(--ok); }
+  button.done { background:var(--okbg); }
   .row { display:grid; grid-template-columns:16ch minmax(0,1.65fr) minmax(0,1fr) 84px 52px; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); }
   .row:first-child { border-top:0; }
   .row a { color:var(--acc); text-decoration:none; font-weight:600; font-size:13px; }
@@ -39,22 +45,22 @@
   .status.ok { color:var(--ok); } .status.warn { color:var(--warn); }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .combo { position:relative; }
-  .combo ul { display:none; position:absolute; z-index:10; left:0; right:0; top:100%; margin:2px 0 0; padding:4px 0; list-style:none; max-height:240px; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 16px #0002; }
+  .combo ul { display:none; position:absolute; z-index:10; left:0; right:0; top:100%; margin:2px 0 0; padding:4px 0; list-style:none; max-height:240px; overflow:auto; background:var(--pop); border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 16px var(--shadow); }
   .combo li { padding:6px 10px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .combo li:hover, .combo li.hl { background:#e9f2ff; }
+  .combo li:hover, .combo li.hl { background:var(--hov); }
   .combo li.empty { color:var(--mut); cursor:default; }
-  #modal { position:fixed; inset:0; background:#0008; display:flex; align-items:center; justify-content:center; z-index:50; }
+  #modal { position:fixed; inset:0; background:var(--scrim); display:flex; align-items:center; justify-content:center; z-index:50; }
   #modal[hidden] { display:none; }
-  .dlg { background:#fff; border-radius:8px; padding:20px; width:min(640px,94vw); max-height:90vh; overflow:auto; }
+  .dlg { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:20px; width:min(640px,94vw); max-height:90vh; overflow:auto; }
   .dlg table { margin:8px 0; }
   .dlg td.n { width:auto; }
   .dlg .adj { color:var(--warn); font-size:13px; }
   .dlg .was { color:var(--mut); font-size:12px; margin-left:6px; text-decoration:line-through; }
   .mbtns { display:flex; justify-content:flex-end; gap:10px; margin-top:14px; }
   .mbtns .ghost { border:1px solid var(--line); }
-  .mbtns button.done { background:var(--ok); }
+  .mbtns button.done { background:var(--okbg); }
   #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); padding:10px 16px; border-radius:6px; color:#fff; display:none; max-width:90vw; }
-  #toast.ok { background:var(--ok); } #toast.err { background:var(--bad); }
+  #toast.ok { background:var(--okbg); } #toast.err { background:var(--badbg); }
   #toast a { color:#fff; }
   table { width:100%; border-collapse:collapse; }
   th, td { padding:6px 8px; border-top:1px solid var(--line); text-align:left; }
@@ -62,7 +68,7 @@
   td.n, th.n { text-align:right; white-space:nowrap; width:48px; }
   th.grp { text-align:center; border-bottom:1px solid var(--line); border-left:1px solid var(--line); color:var(--txt); }
   .tot { font-weight:600; border-right:0; }
-  td.tot, th.tot { background:#f7f8f9; }
+  td.tot, th.tot { background:var(--tot); }
   td a { color:var(--acc); text-decoration:none; font-weight:600; margin-right:8px; }
   tfoot td { font-weight:600; }
   #weeks { overflow-x:auto; }
@@ -75,7 +81,7 @@
 </style>
 </head>
 <body>
-<header><h1>jira-companion</h1><span id="me"></span></header>
+<header><div class="brand"><h1>jira-companion</h1><button class="ghost" id="theme" title="Switch light/dark theme"></button></div><span id="me"></span></header>
 <main>
   <section id="day">
     <h2>Today <small id="date"></small></h2>
@@ -155,6 +161,15 @@ function toast(html, ok, ms) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.style.display = 'none', ms || (ok ? 4000 : 8000));
 }
+
+// ---- theme ----
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $('#theme').textContent = t === 'dark' ? '☀ Light' : '☾ Dark';
+  try { localStorage.setItem('jira-companion-theme', t); } catch {}
+}
+$('#theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+applyTheme(document.documentElement.dataset.theme);
 
 // ---- time ----
 const durRe = /^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?$/;
