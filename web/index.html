@@ -47,10 +47,16 @@
   table { width:100%; border-collapse:collapse; }
   th, td { padding:6px 8px; border-top:1px solid var(--line); text-align:left; }
   th { font-size:12px; color:var(--mut); font-weight:600; border-top:0; }
-  td.n, th.n { text-align:right; white-space:nowrap; width:78px; }
-  h3 { font-size:13px; color:var(--mut); margin:16px 0 4px; }
+  td.n, th.n { text-align:right; white-space:nowrap; width:48px; }
+  th.grp { text-align:center; border-bottom:1px solid var(--line); border-left:1px solid var(--line); color:var(--txt); }
+  .tot { font-weight:600; border-right:0; }
+  td.tot, th.tot { background:#f7f8f9; }
   td a { color:var(--acc); text-decoration:none; font-weight:600; margin-right:8px; }
   tfoot td { font-weight:600; }
+  #weeks { overflow-x:auto; }
+  #wtables table { font-size:13px; }
+  #wtables th, #wtables td { padding:6px 4px; }
+  #wtables td:first-child { max-width:220px; min-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .empty-note { color:var(--mut); padding:8px 0; }
 </style>
 </head>
@@ -391,37 +397,46 @@ async function loadWeeks() {
   try {
     const { weeks } = await api('/api/weeks');
     box.innerHTML = '';
-    $('#wnote').textContent = '';
-    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-    weeks.forEach((w, k) => {
-      const title = document.createElement('h3');
-      title.textContent = (k ? 'Current week' : 'Previous week') + ' · ' + w.from + ' – ' + w.to;
-      box.append(title);
-      if (!w.rows.length) { const n = document.createElement('div'); n.className = 'empty-note'; n.textContent = 'No logged time.'; box.append(n); return; }
-      const tbl = document.createElement('table');
-      const add = (parent, cells, tag) => {
-        const tr = document.createElement('tr');
-        cells.forEach((c, i) => {
-          const td = document.createElement(tag || 'td');
-          if (c instanceof Node) td.append(c); else td.textContent = c;
-          if (i) td.className = 'n';
-          tr.append(td);
-        });
-        parent.append(tr);
-      };
-      const head = document.createElement('thead'), body = document.createElement('tbody'), foot = document.createElement('tfoot');
-      add(head, ['Task', ...names, 'Total'], 'th');
-      for (const r of w.rows) {
-        const cell = document.createDocumentFragment();
-        const a = document.createElement('a');
-        a.textContent = r.key; a.href = baseUrl + '/browse/' + r.key; a.target = '_blank'; a.rel = 'noopener';
-        cell.append(a, r.summary);
-        add(body, [cell, ...r.days.map(m => fmt(m) || '–'), fmt(r.total)]);
-      }
-      add(foot, ['Total', ...w.days.map(m => fmt(m) || '–'), fmt(w.total)]);
-      tbl.append(head, body, foot);
-      box.append(tbl);
-    });
+    const note = $('#wnote');
+    note.textContent = '';
+    // merge both weeks by task key
+    const byKey = new Map();
+    weeks.forEach((w, k) => w.rows.forEach(r => {
+      if (!byKey.has(r.key)) byKey.set(r.key, { key: r.key, summary: r.summary, w: [null, null] });
+      byKey.get(r.key).w[k] = r;
+    }));
+    if (!byKey.size) { note.textContent = 'No logged time in these two weeks.'; return; }
+    const rows = [...byKey.values()].sort((a, b) => a.key < b.key ? -1 : 1);
+    const zero = [0, 0, 0, 0, 0];
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    const tr = (parent, cells, tag, cls) => {
+      const el = document.createElement('tr');
+      cells.forEach((c, i) => {
+        const td = document.createElement(tag || 'td');
+        if (c && c.span) { td.colSpan = c.span; td.textContent = c.text; td.className = 'grp'; }
+        else if (c instanceof Node) td.append(c);
+        else td.textContent = c;
+        if (i && !(c && c.span)) td.className = 'n' + (cls && cls(i) ? ' ' + cls(i) : '');
+        el.append(td);
+      });
+      parent.append(el);
+    };
+    const sep = i => (i === 6 || i === 12) ? 'tot' : '';   // total columns
+    const tbl = document.createElement('table');
+    const head = document.createElement('thead'), body = document.createElement('tbody'), foot = document.createElement('tfoot');
+    tr(head, [' ', { span: 6, text: `Previous week ${weeks[0].from} – ${weeks[0].to}` }, { span: 6, text: `Current week ${weeks[1].from} – ${weeks[1].to}` }], 'th');
+    tr(head, ['Task', ...days, 'Σ', ...days, 'Σ'], 'th', sep);
+    const cells = (w, k) => { const d = w ? w.days : zero; return [...d.map(m => fmt(m) || '–'), fmt(w ? w.total : 0) || '–']; };
+    for (const r of rows) {
+      const cell = document.createDocumentFragment();
+      const a = document.createElement('a');
+      a.textContent = r.key; a.href = baseUrl + '/browse/' + r.key; a.target = '_blank'; a.rel = 'noopener';
+      cell.append(a, r.summary);
+      tr(body, [cell, ...cells(r.w[0]), ...cells(r.w[1])], 'td', sep);
+    }
+    tr(foot, ['Total', ...cells(weeks[0]), ...cells(weeks[1])], 'td', sep);
+    tbl.append(head, body, foot);
+    box.append(tbl);
   } catch (e) { $('#wnote').textContent = 'Could not load logged hours: ' + e.message; }
 }
 $('#weeks-reload').onclick = loadWeeks;
