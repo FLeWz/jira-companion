@@ -54,6 +54,7 @@ func main() {
 	mux.HandleFunc("POST /api/day/refresh", a.handleRefresh)
 	mux.HandleFunc("POST /api/day/complete", a.handleComplete)
 	mux.HandleFunc("POST /api/tasks", a.handleCreate)
+	mux.HandleFunc("GET /api/weeks", a.handleWeeks)
 
 	addr := env("LISTEN_ADDR", "127.0.0.1:8080")
 	log.Printf("jira-companion listening on %s (jira %s)", addr, a.base)

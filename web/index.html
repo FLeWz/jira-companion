@@ -44,6 +44,12 @@
   #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); padding:10px 16px; border-radius:6px; color:#fff; display:none; max-width:90vw; }
   #toast.ok { background:var(--ok); } #toast.err { background:var(--bad); }
   #toast a { color:#fff; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:6px 8px; border-top:1px solid var(--line); text-align:left; }
+  th { font-size:12px; color:var(--mut); font-weight:600; border-top:0; }
+  td.n, th.n { text-align:right; white-space:nowrap; width:130px; }
+  td a { color:var(--acc); text-decoration:none; font-weight:600; margin-right:8px; }
+  tfoot td { font-weight:600; }
   .empty-note { color:var(--mut); padding:8px 0; }
 </style>
 </head>
@@ -84,6 +90,13 @@
       <div><label>Original due date</label><input id="due" type="date"></div>
     </div>
     <button id="create-btn" class="big">Create task</button>
+  </section>
+</main>
+<main style="grid-template-columns:1fr; padding-top:0">
+  <section id="weeks">
+    <h2>Logged hours <small id="weekrange"></small> <button class="ghost" id="weeks-reload" title="Reload">↻</button></h2>
+    <table id="wtable"><thead><tr><th>Task</th><th class="n">Previous week</th><th class="n">Current week</th></tr></thead><tbody></tbody><tfoot></tfoot></table>
+    <div id="wnote" class="empty-note"></div>
   </section>
 </main>
 <div id="toast"></div>
@@ -313,6 +326,7 @@ $('#complete').onclick = async () => {
     clearDraft();
     toast(`Day complete: logged ${fmt(r.logged)} on ${r.entries} task(s)` + (r.adjusted ? ' (auto-adjusted)' : ''), true);
     await loadDay();
+    loadWeeks();
   } catch (e) {
     toast(e.message, false);
     if (e.data && e.data.day) setDay(e.data.day); else updateStatus();
@@ -371,6 +385,32 @@ $('#create-btn').onclick = async () => {
 };
 $('#summary').onkeydown = e => { if (e.key === 'Enter') $('#create-btn').click(); };
 
+async function loadWeeks() {
+  const body = $('#wtable tbody'), foot = $('#wtable tfoot');
+  try {
+    const w = await api('/api/weeks');
+    body.innerHTML = foot.innerHTML = '';
+    $('#weekrange').textContent = `${w.prevFrom} – ${w.curTo}`;
+    $('#wnote').textContent = w.rows.length ? '' : 'No logged time in these two weeks.';
+    const cell = (tr, text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.append(td); return td; };
+    for (const r of w.rows) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      const a = document.createElement('a');
+      a.textContent = r.key; a.href = baseUrl + '/browse/' + r.key; a.target = '_blank'; a.rel = 'noopener';
+      td.append(a, r.summary); tr.append(td);
+      cell(tr, fmt(r.prev) || '–', 'n'); cell(tr, fmt(r.cur) || '–', 'n');
+      body.append(tr);
+    }
+    if (w.rows.length) {
+      const tr = document.createElement('tr');
+      cell(tr, 'Total'); cell(tr, fmt(w.prev) || '–', 'n'); cell(tr, fmt(w.cur) || '–', 'n');
+      foot.append(tr);
+    }
+  } catch (e) { $('#wnote').textContent = 'Could not load logged hours: ' + e.message; }
+}
+$('#weeks-reload').onclick = loadWeeks;
+
 (async function init() {
   resetForm();
   try {
@@ -386,6 +426,7 @@ $('#summary').onkeydown = e => { if (e.key === 'Enter') $('#create-btn').click()
     assignee.set(r.assignee || meRef());
     reporter.set(r.reporter || meRef());
   } catch (e) { toast(e.message, false); }
+  loadWeeks();
   $('#workday').focus();
 })();
 </script>
