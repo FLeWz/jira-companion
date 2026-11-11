@@ -209,7 +209,30 @@ function payload() {
   return { workday: $('#workday').value, entries: day.entries.map(e => ({ key: e.key, summary: e.summary, time: e.time })) };
 }
 
+// Local draft: survives reloads until Complete day succeeds.
+const DRAFT = 'jira-companion-draft';
+function persist() {
+  try {
+    localStorage.setItem(DRAFT, JSON.stringify({
+      date: day.date, workday: $('#workday').value,
+      entries: day.entries.filter(e => !e.logged).map(e => ({ key: e.key, summary: e.summary, time: e.time })),
+    }));
+  } catch {}
+}
+function clearDraft() { try { localStorage.removeItem(DRAFT); } catch {} }
+function applyDraft(d) {
+  let dr;
+  try { dr = JSON.parse(localStorage.getItem(DRAFT) || 'null'); } catch { dr = null; }
+  if (!dr || dr.date !== d.date) return false;
+  if (typeof dr.workday === 'string') d.workday = dr.workday;
+  const byKey = new Map(dr.entries.map(e => [e.key, e]));
+  for (const e of d.entries) { const l = byKey.get(e.key); if (l && !e.logged) e.time = l.time; }
+  for (const l of dr.entries) if (!d.entries.some(e => e.key === l.key)) d.entries.push({ ...l, logged: false });
+  return true;
+}
+
 function queueSave() {
+  persist();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 400);
 }
@@ -254,7 +277,13 @@ function setDay(d) {
   if (d.warning) toast(d.warning, false);
 }
 
-async function loadDay() { setDay(await api('/api/day')); return day; }
+async function loadDay() {
+  const d = await api('/api/day');
+  const restored = applyDraft(d);
+  setDay(d);
+  if (restored) queueSave(); // push restored draft to server
+  return day;
+}
 
 // ---- wire up ----
 $('#workday').oninput = () => { $('#workday').classList.toggle('bad', parseDur($('#workday').value) === null); updateStatus(); queueSave(); };
@@ -281,8 +310,9 @@ $('#complete').onclick = async () => {
   try {
     await flush();
     const r = await api('/api/day/complete', 'POST');
+    clearDraft();
     toast(`Day complete: logged ${fmt(r.logged)} on ${r.entries} task(s)` + (r.adjusted ? ' (auto-adjusted)' : ''), true);
-    setDay(await api('/api/day'));
+    await loadDay();
   } catch (e) {
     toast(e.message, false);
     if (e.data && e.data.day) setDay(e.data.day); else updateStatus();
