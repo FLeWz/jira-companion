@@ -12,17 +12,20 @@ import (
 type WeekRow struct {
 	Key     string `json:"key"`
 	Summary string `json:"summary"`
-	Prev    int    `json:"prev"` // minutes, previous week
-	Cur     int    `json:"cur"`  // minutes, current week
+	Days    [5]int `json:"days"` // minutes Mon..Fri
+	Total   int    `json:"total"`
+}
+
+type Week struct {
+	From  string    `json:"from"` // Monday
+	To    string    `json:"to"`   // Friday
+	Rows  []WeekRow `json:"rows"`
+	Days  [5]int    `json:"days"`
+	Total int       `json:"total"`
 }
 
 type WeeksDTO struct {
-	PrevFrom string    `json:"prevFrom"`
-	CurFrom  string    `json:"curFrom"`
-	CurTo    string    `json:"curTo"`
-	Rows     []WeekRow `json:"rows"`
-	Prev     int       `json:"prev"`
-	Cur      int       `json:"cur"`
+	Weeks []Week `json:"weeks"` // previous, current
 }
 
 // weekStart returns Monday 00:00 local of t's week.
@@ -91,7 +94,8 @@ func (a *app) handleWeeks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows := make([]WeekRow, len(issues))
+	// Previous (index 0) and current (index 1) week; weekends are ignored.
+	rows := make([][2]WeekRow, len(issues))
 	errs := make([]error, len(issues))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 6)
@@ -101,18 +105,24 @@ func (a *app) handleWeeks(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows[i] = WeekRow{Key: is.Key, Summary: is.Summary}
+			rows[i] = [2]WeekRow{{Key: is.Key, Summary: is.Summary}, {Key: is.Key, Summary: is.Summary}}
 			wl, err := a.jira.worklogs(is.Key, me.ID, prev, end)
 			if err != nil {
 				errs[i] = err
 				return
 			}
 			for _, l := range wl {
-				if l.Started.Before(cur) {
-					rows[i].Prev += l.Minutes
-				} else {
-					rows[i].Cur += l.Minutes
+				t := l.Started.In(now.Location())
+				wd := (int(t.Weekday()) + 6) % 7
+				if wd > 4 {
+					continue
 				}
+				w := 0
+				if !t.Before(cur) {
+					w = 1
+				}
+				rows[i][w].Days[wd] += l.Minutes
+				rows[i][w].Total += l.Minutes
 			}
 		}()
 	}
@@ -124,15 +134,26 @@ func (a *app) handleWeeks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out := WeeksDTO{PrevFrom: prev.Format(d), CurFrom: cur.Format(d), CurTo: end.AddDate(0, 0, -1).Format(d), Rows: []WeekRow{}}
-	for _, row := range rows {
-		if row.Prev == 0 && row.Cur == 0 {
-			continue
+	out := WeeksDTO{Weeks: []Week{
+		{From: prev.Format(d), To: prev.AddDate(0, 0, 4).Format(d), Rows: []WeekRow{}},
+		{From: cur.Format(d), To: cur.AddDate(0, 0, 4).Format(d), Rows: []WeekRow{}},
+	}}
+	for _, r := range rows {
+		for k := range r {
+			if r[k].Total == 0 {
+				continue
+			}
+			wk := &out.Weeks[k]
+			wk.Rows = append(wk.Rows, r[k])
+			wk.Total += r[k].Total
+			for d, m := range r[k].Days {
+				wk.Days[d] += m
+			}
 		}
-		out.Rows = append(out.Rows, row)
-		out.Prev += row.Prev
-		out.Cur += row.Cur
 	}
-	sort.Slice(out.Rows, func(i, j int) bool { return out.Rows[i].Key < out.Rows[j].Key })
+	for k := range out.Weeks {
+		rs := out.Weeks[k].Rows
+		sort.Slice(rs, func(i, j int) bool { return rs[i].Key < rs[j].Key })
+	}
 	writeJSON(w, 200, out)
 }
