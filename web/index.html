@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jira-companion</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --line:#dfe1e6; --txt:#172b4d; --mut:#6b778c; --acc:#0c66e4; --ok:#1f845a; --warn:#b65c02; --bad:#c9372c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  header { display:flex; justify-content:space-between; align-items:baseline; max-width:1000px; margin:0 auto; padding:16px 16px 0; }
+  header h1 { font-size:20px; margin:0; }
+  #me { color:var(--mut); }
+  main { max-width:1000px; margin:0 auto; padding:16px; display:grid; gap:16px; grid-template-columns:1fr 1fr; align-items:start; }
+  @media (max-width:820px) { main { grid-template-columns:1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  h2 { font-size:16px; margin:0 0 12px; display:flex; justify-content:space-between; align-items:baseline; }
+  h2 small { font-weight:normal; color:var(--mut); }
+  label { display:block; font-size:12px; color:var(--mut); margin:10px 0 3px; }
+  input { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; color:inherit; }
+  input:focus { outline:2px solid var(--acc); outline-offset:-1px; }
+  input.bad { border-color:var(--bad); }
+  button { font:inherit; padding:8px 14px; border:0; border-radius:6px; background:var(--acc); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
+  button.ghost { background:none; color:var(--mut); padding:4px 8px; }
+  button.big { width:100%; margin-top:14px; padding:11px; font-weight:600; }
+  button.done { background:var(--ok); }
+  .row { display:grid; grid-template-columns:70px 1fr 90px 24px; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); }
+  .row:first-child { border-top:0; }
+  .row a { color:var(--acc); text-decoration:none; font-weight:600; font-size:13px; }
+  .row .sum { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row.logged { opacity:.5; }
+  .row input { text-align:right; }
+  .wd { display:flex; align-items:center; gap:10px; }
+  .wd input { width:110px; font-size:18px; text-align:center; }
+  .status { margin-top:12px; font-size:13px; color:var(--mut); }
+  .status.ok { color:var(--ok); } .status.warn { color:var(--warn); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .combo { position:relative; }
+  .combo ul { display:none; position:absolute; z-index:10; left:0; right:0; top:100%; margin:2px 0 0; padding:4px 0; list-style:none; max-height:240px; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 16px #0002; }
+  .combo li { padding:6px 10px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .combo li:hover, .combo li.hl { background:#e9f2ff; }
+  .combo li.empty { color:var(--mut); cursor:default; }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); padding:10px 16px; border-radius:6px; color:#fff; display:none; max-width:90vw; }
+  #toast.ok { background:var(--ok); } #toast.err { background:var(--bad); }
+  #toast a { color:#fff; }
+  .empty-note { color:var(--mut); padding:8px 0; }
+</style>
+</head>
+<body>
+<header><h1>jira-companion</h1><span id="me"></span></header>
+<main>
+  <section id="day">
+    <h2>Today <small id="date"></small></h2>
+    <label>Work day hours</label>
+    <div class="wd"><input id="workday" placeholder="8h" autocomplete="off"><span id="wdhint" class="status" style="margin:0"></span></div>
+
+    <label>Tasks</label>
+    <div id="list"></div>
+    <label>Add other task</label>
+    <div id="addtask"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center">
+      <span></span><button class="ghost" id="refresh" title="Fetch my active tasks again">↻ reload my tasks</button>
+    </div>
+
+    <div id="status" class="status"></div>
+    <button id="complete" class="big done">Complete day</button>
+  </section>
+
+  <section id="create">
+    <h2>New task</h2>
+    <label>Summary</label>
+    <input id="summary" autocomplete="off">
+    <label>Project</label><div id="project"></div>
+    <label>Parent</label><div id="parent"></div>
+    <div class="grid2">
+      <div><label>Assignee</label><div id="assignee"></div></div>
+      <div><label>Reporter</label><div id="reporter"></div></div>
+    </div>
+    <div class="grid2">
+      <div><label>Original estimate</label><input id="estimate" placeholder="4h 30m" autocomplete="off"></div>
+      <div></div>
+      <div><label>Original start date</label><input id="start" type="date"></div>
+      <div><label>Original due date</label><input id="due" type="date"></div>
+    </div>
+    <button id="create-btn" class="big">Create task</button>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const q = encodeURIComponent;
+
+async function api(path, method, body) {
+  const r = await fetch(path, {
+    method: method || 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let d = {};
+  try { d = await r.json(); } catch {}
+  if (!r.ok) { const e = new Error(d.error || r.statusText); e.data = d; throw e; }
+  return d;
+}
+
+let toastTimer;
+function toast(html, ok, ms) {
+  const t = $('#toast');
+  t.className = ok ? 'ok' : 'err';
+  t.innerHTML = '';
+  if (typeof html === 'string') t.textContent = html; else t.append(html);
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.style.display = 'none', ms || (ok ? 4000 : 8000));
+}
+
+// ---- time ----
+const durRe = /^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?$/;
+function parseDur(s) {
+  s = s.trim().toLowerCase();
+  if (!s) return 0;
+  const m = durRe.exec(s);
+  return m ? (+m[1] || 0) * 60 + (+m[2] || 0) : null;
+}
+function fmt(min) {
+  if (!min) return '';
+  const h = Math.floor(min / 60), m = min % 60;
+  return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`;
+}
+
+// ---- searchable dropdown ----
+function Combo(root, o) {
+  const inp = document.createElement('input');
+  inp.placeholder = o.placeholder || 'Search…';
+  inp.autocomplete = 'off';
+  const ul = document.createElement('ul');
+  root.classList.add('combo');
+  root.append(inp, ul);
+  let value = null, timer, seq = 0, items = [], hl = -1;
+
+  function paint() {
+    [...ul.children].forEach((li, i) => li.classList.toggle('hl', i === hl));
+  }
+  function show(list) {
+    items = list; hl = list.length ? 0 : -1;
+    ul.innerHTML = '';
+    list.forEach(it => {
+      const li = document.createElement('li');
+      li.textContent = it.label;
+      li.onmousedown = e => { e.preventDefault(); pick(it); };
+      ul.append(li);
+    });
+    if (!list.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'No results'; ul.append(li); }
+    ul.style.display = 'block';
+    paint();
+  }
+  async function load(text) {
+    const my = ++seq;
+    try {
+      let r = await o.search(text);
+      if (o.clearable && value && !text) r = [{ id: null, label: '— none —' }, ...r];
+      if (my === seq) show(r);
+    } catch (e) { if (my === seq) { show([]); } }
+  }
+  function set(v) { value = v; inp.value = v ? v.label : ''; ul.style.display = 'none'; }
+  function pick(it) {
+    set(it.id === null ? null : it);
+    if (o.onChange) o.onChange(value);
+  }
+  inp.addEventListener('focus', () => { inp.select(); load(''); });
+  inp.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => load(inp.value), 250); });
+  inp.addEventListener('blur', () => { ul.style.display = 'none'; inp.value = value ? value.label : ''; });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { hl = Math.min(hl + 1, items.length - 1); paint(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { hl = Math.max(hl - 1, 0); paint(); e.preventDefault(); }
+    else if (e.key === 'Enter') { if (items[hl]) pick(items[hl]); e.preventDefault(); inp.blur(); }
+    else if (e.key === 'Escape') inp.blur();
+  });
+  return { get: () => value, set };
+}
+
+// ---- state ----
+let day = { workday: '', entries: [] };
+let me = null, baseUrl = '';
+let saveTimer = null, saving = Promise.resolve();
+
+function sum() {
+  let t = 0, bad = false;
+  for (const e of day.entries) { const v = parseDur(e.time); if (v === null) bad = true; else t += v; }
+  return { t, bad };
+}
+
+function updateStatus() {
+  const wd = parseDur($('#workday').value);
+  const { t, bad } = sum();
+  const st = $('#status'), btn = $('#complete');
+  let msg = '', cls = '', ok = true;
+  if (wd === null || bad) { msg = 'Fix invalid time (use e.g. 1h 30m)'; cls = 'warn'; ok = false; }
+  else if (!wd) { msg = 'Enter work day hours'; ok = false; }
+  else if (!t) { msg = 'Enter time on at least one task'; ok = false; }
+  else if (t === wd) { msg = `Logged ${fmt(t)} of ${fmt(wd)} ✓`; cls = 'ok'; }
+  else { msg = `Logged ${fmt(t)} of ${fmt(wd)} — will auto-adjust tasks to ${fmt(wd)}`; cls = 'warn'; }
+  st.textContent = msg; st.className = 'status ' + cls;
+  btn.disabled = !ok;
+}
+
+function payload() {
+  return { workday: $('#workday').value, entries: day.entries.map(e => ({ key: e.key, summary: e.summary, time: e.time })) };
+}
+
+function queueSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 400);
+}
+function flush() {
+  clearTimeout(saveTimer);
+  saving = saving.then(() => api('/api/day', 'PUT', payload())).catch(e => { toast(e.message, false); });
+  return saving;
+}
+
+function render() {
+  $('#workday').value = day.workday;
+  $('#date').textContent = day.date || '';
+  const list = $('#list');
+  list.innerHTML = '';
+  if (!day.entries.length) {
+    list.innerHTML = '<div class="empty-note">No active tasks. Add one below or create a new task.</div>';
+  }
+  day.entries.forEach((e, i) => {
+    const row = document.createElement('div');
+    row.className = 'row' + (e.logged ? ' logged' : '');
+    const a = document.createElement('a');
+    a.textContent = e.key; a.href = baseUrl + '/browse/' + e.key; a.target = '_blank'; a.rel = 'noopener';
+    const sm = document.createElement('span');
+    sm.className = 'sum'; sm.textContent = e.summary; sm.title = e.summary;
+    const t = document.createElement('input');
+    t.value = e.time; t.placeholder = '0m'; t.disabled = e.logged; t.autocomplete = 'off';
+    t.oninput = () => { e.time = t.value; t.classList.toggle('bad', parseDur(t.value) === null); updateStatus(); queueSave(); };
+    t.onblur = () => { const v = parseDur(t.value); if (v !== null) { e.time = t.value = fmt(v); updateStatus(); queueSave(); } };
+    t.onkeydown = ev => { if (ev.key === 'Enter') { const n = list.querySelectorAll('.row input:not(:disabled)')[ [...list.querySelectorAll('.row input:not(:disabled)')].indexOf(t) + 1 ]; (n || $('#complete')).focus(); } };
+    const x = document.createElement('button');
+    x.className = 'ghost'; x.textContent = '×'; x.title = 'Remove from today'; x.disabled = e.logged;
+    x.onclick = () => { day.entries.splice(i, 1); render(); queueSave(); };
+    row.append(a, sm, t, x);
+    list.append(row);
+  });
+  updateStatus();
+}
+
+function setDay(d) {
+  day = d;
+  render();
+  if (d.warning) toast(d.warning, false);
+}
+
+async function loadDay() { setDay(await api('/api/day')); return day; }
+
+// ---- wire up ----
+$('#workday').oninput = () => { $('#workday').classList.toggle('bad', parseDur($('#workday').value) === null); updateStatus(); queueSave(); };
+$('#workday').onblur = () => { const v = parseDur($('#workday').value); if (v !== null) { $('#workday').value = fmt(v); queueSave(); } };
+
+$('#refresh').onclick = async () => { await flush(); try { setDay(await api('/api/day/refresh', 'POST')); } catch (e) { toast(e.message, false); } };
+
+const addCombo = Combo($('#addtask'), {
+  placeholder: 'Search key or summary…',
+  search: t => api('/api/search/issues?q=' + q(t)),
+  onChange: it => {
+    if (!it) return;
+    addCombo.set(null);
+    if (!day.entries.some(e => e.key === it.key)) {
+      day.entries.push({ key: it.key, summary: it.summary, time: '', logged: false });
+      render(); queueSave();
+    }
+  },
+});
+
+$('#complete').onclick = async () => {
+  const btn = $('#complete');
+  btn.disabled = true;
+  try {
+    await flush();
+    const r = await api('/api/day/complete', 'POST');
+    toast(`Day complete: logged ${fmt(r.logged)} on ${r.entries} task(s)` + (r.adjusted ? ' (auto-adjusted)' : ''), true);
+    setDay(await api('/api/day'));
+  } catch (e) {
+    toast(e.message, false);
+    if (e.data && e.data.day) setDay(e.data.day); else updateStatus();
+  }
+};
+
+// create form
+const pickedProject = () => { const p = project.get(); return p ? p.id : ''; };
+const project = Combo($('#project'), {
+  placeholder: 'Search project…',
+  search: t => api('/api/search/projects?q=' + q(t)),
+  onChange: () => { parentCombo.set(null); assignee.set(meRef()); },
+});
+const parentCombo = Combo($('#parent'), {
+  placeholder: 'Search parent (optional)…', clearable: true,
+  search: t => api(`/api/search/issues?parents=1&project=${q(pickedProject())}&q=${q(t)}`),
+});
+async function userSearch(kind, t) {
+  let r = await api(`/api/search/users?kind=${kind}&project=${q(pickedProject())}&q=${q(t)}`);
+  if (me && (!t || 'me'.startsWith(t.toLowerCase()))) r = [{ id: me.id, label: me.label + ' (me)' }, ...r.filter(u => u.id !== me.id)];
+  return r;
+}
+const assignee = Combo($('#assignee'), { placeholder: 'Assignee…', search: t => userSearch('assignee', t) });
+const reporter = Combo($('#reporter'), { placeholder: 'Reporter…', search: t => userSearch('reporter', t) });
+// "set(me)" helper: me stored with label suffix
+const meRef = () => me && { id: me.id, label: me.label + ' (me)' };
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function resetForm() {
+  $('#summary').value = ''; $('#estimate').value = ''; $('#due').value = ''; $('#start').value = today();
+}
+
+$('#create-btn').onclick = async () => {
+  const btn = $('#create-btn');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/tasks', 'POST', {
+      summary: $('#summary').value, project: project.get(), parent: parentCombo.get(),
+      assignee: assignee.get(), reporter: reporter.get(),
+      estimate: $('#estimate').value, start: $('#start').value, due: $('#due').value,
+    });
+    const span = document.createElement('span');
+    const a = document.createElement('a');
+    a.href = r.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = r.key;
+    span.append('Created ', a, r.warning ? ' — ' + r.warning : '');
+    toast(span, true, 6000);
+    resetForm();
+    await flush();
+    await loadDay();
+    $('#summary').focus();
+  } catch (e) { toast(e.message, false); }
+  btn.disabled = false;
+};
+$('#summary').onkeydown = e => { if (e.key === 'Enter') $('#create-btn').click(); };
+
+(async function init() {
+  resetForm();
+  try {
+    const m = await api('/api/me');
+    me = m.me; baseUrl = m.baseUrl;
+    $('#me').textContent = me.label;
+  } catch (e) { toast('Jira: ' + e.message, false); }
+  try {
+    await loadDay();
+    const r = day.remember || {};
+    project.set(r.project || null);
+    parentCombo.set(r.parent || null);
+    assignee.set(r.assignee || meRef());
+    reporter.set(r.reporter || meRef());
+  } catch (e) { toast(e.message, false); }
+  $('#workday').focus();
+})();
+</script>
+</body>
+</html>
