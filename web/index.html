@@ -33,7 +33,7 @@
   button.ghost { background:none; color:var(--mut); padding:4px 8px; }
   button.big { width:100%; margin-top:14px; padding:11px; font-weight:600; }
   button.done { background:var(--okbg); }
-  .row { display:grid; grid-template-columns:16ch minmax(0,1.65fr) minmax(0,1fr) 84px 52px; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); }
+  .row { display:grid; grid-template-columns:16ch minmax(0,1.65fr) minmax(0,1fr) 84px 78px; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); }
   .row:first-child { border-top:0; }
   .row a { color:var(--acc); text-decoration:none; font-weight:600; font-size:13px; }
   .row .sum { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -339,10 +339,15 @@ function render() {
       render(); queueSave();
       const rows = $('#list').querySelectorAll('.row'); rows[last + 1].querySelector('input').focus();
     };
+    const close = document.createElement('button');
+    close.className = 'ghost'; close.textContent = '✓'; close.title = 'Close task in Jira (move to Done)';
+    close.onclick = () => closeTask(e);
     const x = document.createElement('button');
     x.className = 'ghost'; x.textContent = '×'; x.title = 'Remove this entry'; x.disabled = e.logged;
     x.onclick = () => { day.entries.splice(i, 1); render(); queueSave(); };
-    btns.append(plus, x);
+    btns.append(plus);
+    if (first) btns.append(close);
+    btns.append(x);
     row.append(a, sm, c, t, btns);
     list.append(row);
   });
@@ -382,30 +387,11 @@ const addCombo = Combo($('#addtask'), {
   },
 });
 
-function confirmDay(p) {
+function openModal(title, bodyNodes, okText) {
   return new Promise(resolve => {
-    const body = $('#mbody');
-    body.innerHTML = '';
-    const info = document.createElement('div');
-    info.textContent = `Work day ${p.workday} · ${p.items.length} worklog(s) · total ${p.total}`;
-    body.append(info);
-    if (p.adjusted) {
-      const adj = document.createElement('div');
-      adj.className = 'adj';
-      adj.textContent = 'Entered time did not match work hours; times were auto-adjusted (original struck through).';
-      body.append(adj);
-    }
-    const tbl = document.createElement('table');
-    for (const it of p.items) {
-      const tr = document.createElement('tr');
-      const k = document.createElement('td'); k.textContent = it.key; k.style.fontWeight = '600'; k.style.whiteSpace = 'nowrap';
-      const d = document.createElement('td'); d.textContent = it.comment || it.summary; d.title = it.summary;
-      if (!it.comment) d.style.color = 'var(--mut)';
-      const t = document.createElement('td'); t.className = 'n'; t.textContent = it.time;
-      if (it.original !== it.time) { const was = document.createElement('span'); was.className = 'was'; was.textContent = it.original; t.append(was); }
-      tr.append(k, d, t); tbl.append(tr);
-    }
-    body.append(tbl);
+    $('#mtitle').textContent = title;
+    $('#mok').textContent = okText;
+    $('#mbody').replaceChildren(...bodyNodes);
     const modal = $('#modal');
     const done = v => { modal.hidden = true; document.removeEventListener('keydown', onKey); resolve(v); };
     const onKey = e => { if (e.key === 'Escape') done(false); };
@@ -415,6 +401,59 @@ function confirmDay(p) {
     modal.hidden = false;
     $('#mok').focus();
   });
+}
+
+function confirmDay(p) {
+  const nodes = [];
+  const info = document.createElement('div');
+  info.textContent = `Work day ${p.workday} · ${p.items.length} worklog(s) · total ${p.total}`;
+  nodes.push(info);
+  if (p.adjusted) {
+    const adj = document.createElement('div');
+    adj.className = 'adj';
+    adj.textContent = 'Entered time did not match work hours; times were auto-adjusted (original struck through).';
+    nodes.push(adj);
+  }
+  const tbl = document.createElement('table');
+  for (const it of p.items) {
+    const tr = document.createElement('tr');
+    const k = document.createElement('td'); k.textContent = it.key; k.style.fontWeight = '600'; k.style.whiteSpace = 'nowrap';
+    const d = document.createElement('td'); d.textContent = it.comment || it.summary; d.title = it.summary;
+    if (!it.comment) d.style.color = 'var(--mut)';
+    const t = document.createElement('td'); t.className = 'n'; t.textContent = it.time;
+    if (it.original !== it.time) { const was = document.createElement('span'); was.className = 'was'; was.textContent = it.original; t.append(was); }
+    tr.append(k, d, t); tbl.append(tr);
+  }
+  nodes.push(tbl);
+  return openModal('Complete day — are you sure?', nodes, 'Yes, log it');
+}
+
+async function closeTask(e) {
+  try {
+    await flush();
+    const ts = await api('/api/issues/' + q(e.key) + '/transitions');
+    if (!ts.length) { toast(`${e.key}: no transition to Done available from its current status`, false); return; }
+    const pref = ts.find(t => /^(done|closed|resolved)$/i.test(t.to)) || ts[0];
+    const info = document.createElement('div');
+    info.textContent = `${e.key} ${e.summary}`;
+    const nodes = [info];
+    let sel = null;
+    if (ts.length > 1) {
+      sel = document.createElement('select');
+      sel.style.cssText = 'width:100%; margin-top:10px; padding:7px; font:inherit; background:var(--inp); color:inherit; border:1px solid var(--line); border-radius:6px';
+      ts.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = `${t.name} → ${t.to}`; o.selected = t === pref; sel.append(o); });
+      nodes.push(sel);
+    } else {
+      const to = document.createElement('div'); to.className = 'adj'; to.textContent = `Status will change to: ${pref.to}`; nodes.push(to);
+    }
+    if (day.entries.some(x => x.key === e.key && parseDur(x.time))) {
+      const n = document.createElement('div'); n.className = 'adj'; n.textContent = 'Entries with time stay in today so they can still be logged.'; nodes.push(n);
+    }
+    if (!await openModal('Close task in Jira?', nodes, 'Yes, close it')) return;
+    setDay(await api('/api/issues/' + q(e.key) + '/close', 'POST', { transitionId: sel ? sel.value : pref.id }));
+    persist();
+    toast(`${e.key} closed`, true);
+  } catch (err) { toast(err.message, false); }
 }
 
 $('#complete').onclick = async () => {

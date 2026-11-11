@@ -55,6 +55,8 @@ func main() {
 	mux.HandleFunc("POST /api/day/preview", a.handlePreview)
 	mux.HandleFunc("POST /api/day/complete", a.handleComplete)
 	mux.HandleFunc("POST /api/tasks", a.handleCreate)
+	mux.HandleFunc("GET /api/issues/{key}/transitions", a.handleTransitions)
+	mux.HandleFunc("POST /api/issues/{key}/close", a.handleClose)
 	mux.HandleFunc("GET /api/weeks", a.handleWeeks)
 
 	addr := env("LISTEN_ADDR", "127.0.0.1:8080")
@@ -514,4 +516,72 @@ func (a *app) handleCreate(w http.ResponseWriter, r *http.Request) {
 		log.Printf("save: %v", err)
 	}
 	writeJSON(w, 200, map[string]any{"key": key, "url": a.base + "/browse/" + key, "warning": warning})
+}
+
+// ---- close task ----
+
+func (a *app) handleTransitions(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if !keyRe.MatchString(key) {
+		writeErr(w, 400, errors.New("invalid issue key"))
+		return
+	}
+	ts, err := a.jira.DoneTransitions(key)
+	if err != nil {
+		jiraErr(w, err)
+		return
+	}
+	writeJSON(w, 200, ts)
+}
+
+// handleClose moves the issue to a Done-category status. Only transitions that
+// Jira reports as leading to Done are accepted.
+func (a *app) handleClose(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if !keyRe.MatchString(key) {
+		writeErr(w, 400, errors.New("invalid issue key"))
+		return
+	}
+	var in struct {
+		TransitionID string `json:"transitionId"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	ts, err := a.jira.DoneTransitions(key)
+	if err != nil {
+		jiraErr(w, err)
+		return
+	}
+	ok := false
+	for _, t := range ts {
+		ok = ok || t.ID == in.TransitionID
+	}
+	if !ok {
+		writeErr(w, 400, errors.New("not a valid done transition for "+key))
+		return
+	}
+	if err := a.jira.Transition(key, in.TransitionID); err != nil {
+		jiraErr(w, err)
+		return
+	}
+
+	// Drop the task's empty entries; entries with time stay so it can still be logged.
+	a.st.Lock()
+	defer a.st.Unlock()
+	a.st.Rollover()
+	kept := a.st.S.Entries[:0]
+	for _, e := range a.st.S.Entries {
+		if e.Key == key && e.Minutes == 0 && !e.Logged {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	a.st.S.Entries = kept
+	if err := a.st.Save(); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, a.dto(""))
 }

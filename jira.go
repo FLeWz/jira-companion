@@ -318,3 +318,40 @@ func (j *Jira) AddWorklog(key string, minutes int, started time.Time, comment st
 }
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+type Transition struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	To   string `json:"to"` // target status name
+}
+
+// DoneTransitions lists transitions of an issue that land in a Done category status.
+func (j *Jira) DoneTransitions(key string) ([]Transition, error) {
+	var r struct {
+		Transitions []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			To   struct {
+				Name           string `json:"name"`
+				StatusCategory struct {
+					Key string `json:"key"`
+				} `json:"statusCategory"`
+			} `json:"to"`
+		} `json:"transitions"`
+	}
+	if err := j.do("GET", "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", nil, nil, &r); err != nil {
+		return nil, err
+	}
+	out := []Transition{}
+	for _, t := range r.Transitions {
+		if t.To.StatusCategory.Key == "done" {
+			out = append(out, Transition{t.ID, t.Name, t.To.Name})
+		}
+	}
+	return out, nil
+}
+
+func (j *Jira) Transition(key, id string) error {
+	body := map[string]any{"transition": map[string]any{"id": id}}
+	return j.do("POST", "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", nil, body, nil)
+}
