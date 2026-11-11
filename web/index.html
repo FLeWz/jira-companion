@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jira-companion</title>
+<title>Jira Companion</title>
 <script>try { document.documentElement.dataset.theme = localStorage.getItem("jira-companion-theme") === "dark" ? "dark" : "light"; } catch { document.documentElement.dataset.theme = "light"; }</script>
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <style>
@@ -15,6 +15,7 @@
   body { margin:0; font:15px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
   header { display:flex; justify-content:space-between; align-items:baseline; max-width:1600px; margin:0 auto; padding:16px 16px 0; }
   header h1 { font-size:20px; margin:0; }
+  .brand img { width:28px; height:28px; object-fit:contain; align-self:center; }
   .brand { display:flex; align-items:center; gap:12px; }
   #theme { border:1px solid var(--line); padding:3px 10px; font-size:13px; }
   #me { color:var(--mut); }
@@ -81,7 +82,7 @@
 </style>
 </head>
 <body>
-<header><div class="brand"><h1>jira-companion</h1><button class="ghost" id="theme" title="Switch light/dark theme"></button></div><span id="me"></span></header>
+<header><div class="brand"><img src="/icon.png" alt="" width="28" height="28"><h1>Jira Companion</h1><button class="ghost" id="theme" title="Switch light/dark theme"></button></div><span id="me"></span></header>
 <main>
   <section id="day">
     <h2>Today <small id="date"></small></h2>
