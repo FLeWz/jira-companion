@@ -403,7 +403,7 @@ function openModal(title, bodyNodes, okText) {
   });
 }
 
-function confirmDay(p) {
+function previewNodes(p) {
   const nodes = [];
   const info = document.createElement('div');
   info.textContent = `Work day ${p.workday} · ${p.items.length} worklog(s) · total ${p.total}`;
@@ -425,7 +425,35 @@ function confirmDay(p) {
     tr.append(k, d, t); tbl.append(tr);
   }
   nodes.push(tbl);
-  return openModal('Complete day — are you sure?', nodes, 'Yes, log it');
+  return nodes;
+}
+
+// Resolves to the chosen YYYY-MM-DD date, or null if cancelled.
+async function confirmDay(p) {
+  const dateRow = document.createElement('div');
+  dateRow.style.cssText = 'display:flex; align-items:center; gap:10px; margin-bottom:10px';
+  const lbl = document.createElement('span'); lbl.textContent = 'Log to date';
+  const di = document.createElement('input');
+  di.type = 'date'; di.value = p.date; di.max = day.date; di.style.width = 'auto';
+  dateRow.append(lbl, di);
+  const rest = document.createElement('div');
+  rest.replaceChildren(...previewNodes(p));
+  let chosen = p.date;
+  di.onchange = async () => {
+    if (!di.value) { di.value = chosen; return; }
+    try {
+      const np = await api('/api/day/preview', 'POST', { date: di.value });
+      chosen = np.date;
+      rest.replaceChildren(...previewNodes(np));
+      $('#mok').disabled = false;
+    } catch (e) {
+      rest.replaceChildren(Object.assign(document.createElement('div'), { className: 'adj', textContent: e.message }));
+      $('#mok').disabled = true;
+    }
+  };
+  const ok = await openModal('Complete day — are you sure?', [dateRow, rest], 'Yes, log it');
+  $('#mok').disabled = false;
+  return ok ? chosen : null;
 }
 
 async function closeTask(e) {
@@ -462,8 +490,9 @@ $('#complete').onclick = async () => {
   try {
     await flush();
     const p = await api('/api/day/preview', 'POST');
-    if (!await confirmDay(p)) { updateStatus(); return; }
-    const r = await api('/api/day/complete', 'POST');
+    const date = await confirmDay(p);
+    if (!date) { updateStatus(); return; }
+    const r = await api('/api/day/complete', 'POST', { date });
     clearDraft();
     toast(`Day complete: logged ${fmt(r.logged)} on ${r.entries} worklog(s)` + (r.adjusted ? ' (auto-adjusted)' : ''), true);
     await loadDay();

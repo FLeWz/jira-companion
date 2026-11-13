@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -289,7 +290,9 @@ type completeResp struct {
 
 // planDay computes what Complete day would log: indices of entries to post and
 // their (possibly auto-adjusted) minutes. Does not modify state.
-func planDay(s *State) (idx, planned []int, adjusted bool, err error) {
+// With backdated set, entries already logged today are ignored: the target is
+// the full work day on another date.
+func planDay(s *State, backdated bool) (idx, planned []int, adjusted bool, err error) {
 	if s.WorkdayMin <= 0 {
 		return nil, nil, false, errors.New("set work day hours first")
 	}
@@ -298,7 +301,9 @@ func planDay(s *State) (idx, planned []int, adjusted bool, err error) {
 	for i, e := range s.Entries {
 		switch {
 		case e.Logged:
-			logged += e.Minutes
+			if !backdated {
+				logged += e.Minutes
+			}
 		case e.Minutes > 0:
 			idx = append(idx, i)
 			mins = append(mins, e.Minutes)
@@ -329,7 +334,34 @@ type previewItem struct {
 	Original string `json:"original"` // what was entered
 }
 
+type dateReq struct {
+	Date string `json:"date"`
+}
+
+// parseLogDate reads the optional target date (YYYY-MM-DD) of a request body.
+// Empty means today. Future dates are rejected. Lock held (uses state date).
+func parseLogDate(r *http.Request, today string) (day time.Time, backdated bool, err error) {
+	var in dateReq
+	if r.Body != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<16)).Decode(&in); err != nil && err != io.EOF {
+			return day, false, err
+		}
+	}
+	if in.Date == "" {
+		in.Date = today
+	}
+	day, err = time.ParseInLocation("2006-01-02", in.Date, time.Local)
+	if err != nil {
+		return day, false, fmt.Errorf("invalid date %q", in.Date)
+	}
+	if in.Date > today {
+		return day, false, errors.New("date is in the future")
+	}
+	return day, in.Date != today, nil
+}
+
 type previewResp struct {
+	Date     string        `json:"date"`
 	Adjusted bool          `json:"adjusted"`
 	Workday  string        `json:"workday"`
 	Total    string        `json:"total"`
@@ -342,12 +374,17 @@ func (a *app) handlePreview(w http.ResponseWriter, r *http.Request) {
 	defer a.st.Unlock()
 	a.st.Rollover()
 	s := &a.st.S
-	idx, planned, adjusted, err := planDay(s)
+	day, backdated, err := parseLogDate(r, s.Date)
 	if err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	out := previewResp{Adjusted: adjusted, Workday: FormatMinutes(s.WorkdayMin), Items: []previewItem{}}
+	idx, planned, adjusted, err := planDay(s, backdated)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	out := previewResp{Date: day.Format("2006-01-02"), Adjusted: adjusted, Workday: FormatMinutes(s.WorkdayMin), Items: []previewItem{}}
 	total := 0
 	for k, i := range idx {
 		if planned[k] == 0 {
@@ -366,7 +403,12 @@ func (a *app) handleComplete(w http.ResponseWriter, r *http.Request) {
 	defer a.st.Unlock()
 	a.st.Rollover()
 	s := &a.st.S
-	idx, planned, adjusted, err := planDay(s)
+	day, backdated, err := parseLogDate(r, s.Date)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	idx, planned, adjusted, err := planDay(s, backdated)
 	if err != nil {
 		writeErr(w, 400, err)
 		return
@@ -381,11 +423,10 @@ func (a *app) handleComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Worklogs stack from 08:00 so they do not overlap; clamp to stay on today.
-	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+	// Worklogs stack from 08:00 so they do not overlap; clamp to stay on the log date.
+	start := time.Date(day.Year(), day.Month(), day.Day(), 8, 0, 0, 0, time.Local)
 	for _, e := range s.Entries {
-		if e.Logged {
+		if e.Logged && !backdated {
 			start = start.Add(time.Duration(e.Minutes) * time.Minute)
 		}
 	}
@@ -396,8 +437,8 @@ func (a *app) handleComplete(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		st := start
-		if st.YearDay() != now.YearDay() || st.Day() != now.Day() {
-			st = time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, now.Location())
+		if st.Day() != day.Day() || st.Month() != day.Month() {
+			st = time.Date(day.Year(), day.Month(), day.Day(), 23, 0, 0, 0, time.Local)
 		}
 		if err := a.jira.AddWorklog(e.Key, e.Minutes, st, e.Comment); err != nil {
 			a.st.Save()
