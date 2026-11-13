@@ -238,14 +238,27 @@ func (a *app) handleDayPut(w http.ResponseWriter, r *http.Request) {
 	defer a.st.Unlock()
 	a.st.Rollover()
 	old := map[string]Entry{}
+	oldKeys := map[string]bool{}
+	manualKeys := map[string]bool{}
 	for _, e := range a.st.S.Entries {
 		old[e.ID] = e
+		oldKeys[e.Key] = true
+		if e.Manual {
+			manualKeys[e.Key] = true
+		}
 	}
 	var entries []Entry
 	for _, e := range in.Entries {
-		if prev, ok := old[e.ID]; ok && e.ID != "" && prev.Logged {
+		prev, known := old[e.ID]
+		known = known && e.ID != ""
+		if known && prev.Logged {
 			entries = append(entries, prev) // logged entries are frozen
 			continue
+		}
+		// Manual: task not on the server day yet (added by hand), or already manual.
+		manual := manualKeys[e.Key] || !oldKeys[e.Key]
+		if known {
+			manual = prev.Manual
 		}
 		m, err := ParseMinutes(e.Time)
 		if err != nil {
@@ -256,7 +269,7 @@ func (a *app) handleDayPut(w http.ResponseWriter, r *http.Request) {
 		if id == "" {
 			id = NewID()
 		}
-		entries = append(entries, Entry{ID: id, Key: e.Key, Summary: e.Summary, Minutes: m, Comment: strings.TrimSpace(e.Comment)})
+		entries = append(entries, Entry{ID: id, Key: e.Key, Summary: e.Summary, Minutes: m, Comment: strings.TrimSpace(e.Comment), Manual: manual})
 	}
 	a.st.S.WorkdayMin = wd
 	a.st.S.Entries = entries

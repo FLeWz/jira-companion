@@ -22,6 +22,7 @@ type Entry struct {
 	Minutes int    `json:"minutes"`
 	Comment string `json:"comment,omitempty"`
 	Logged  bool   `json:"logged"`
+	Manual  bool   `json:"manual,omitempty"` // added by hand; survives Complete day
 }
 
 type Remember struct {
@@ -77,9 +78,18 @@ func (s *Store) Rollover() {
 	}
 }
 
-// resetDay clears the day, keeps remembered values. Lock held.
+// resetDay clears the day, keeps remembered values and manually added tasks
+// (one blank entry per task). Lock held.
 func (s *Store) resetDay() {
-	s.S.Entries = nil
+	var keep []Entry
+	seen := map[string]bool{}
+	for _, e := range s.S.Entries {
+		if e.Manual && !seen[e.Key] {
+			seen[e.Key] = true
+			keep = append(keep, Entry{ID: NewID(), Key: e.Key, Summary: e.Summary, Manual: true})
+		}
+	}
+	s.S.Entries = keep
 	s.S.Loaded = false
 	s.S.WorkdayMin = s.S.Remember.Workday
 }
