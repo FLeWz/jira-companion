@@ -114,8 +114,8 @@
     <div class="grid2">
       <div><label>Original estimate</label><input id="estimate" placeholder="4h 30m" autocomplete="off"></div>
       <div></div>
-      <div><label>Original start date</label><input id="start" type="date"></div>
-      <div><label>Original due date</label><input id="due" type="date"></div>
+      <div><label>Original start date</label><input id="start" placeholder="dd/mm/yyyy" autocomplete="off"></div>
+      <div><label>Original due date</label><input id="due" placeholder="dd/mm/yyyy" autocomplete="off"></div>
     </div>
     <button id="create-btn" class="big">Create task</button>
   </section>
@@ -139,6 +139,42 @@
 <script>
 const $ = s => document.querySelector(s);
 const q = encodeURIComponent;
+
+// Dates travel as ISO (YYYY-MM-DD) on the API and are shown as dd/mm/yyyy.
+const dmy = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso || ''); };
+// Text input (dd/mm/yyyy) plus a calendar button opening the native picker.
+function withPicker(inp, max) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative; width:' + (inp.style.width || '100%');
+  inp.style.width = '100%'; inp.style.paddingRight = '34px';
+  inp.replaceWith(wrap);
+  const nat = document.createElement('input');
+  nat.type = 'date'; nat.tabIndex = -1;
+  nat.style.cssText = 'position:absolute; right:0; bottom:0; width:1px; height:1px; opacity:0; pointer-events:none';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'ghost'; btn.textContent = '📅'; btn.title = 'Pick a date';
+  btn.style.cssText = 'position:absolute; right:3px; top:50%; transform:translateY(-50%); padding:2px 6px; line-height:1; font-size:15px';
+  btn.onclick = () => {
+    const iso = parseDmy(inp.value);
+    nat.value = iso || '';
+    nat.max = typeof max === 'function' ? max() : (max || '');
+    try { nat.showPicker(); } catch { nat.focus(); }
+  };
+  nat.onchange = () => { if (nat.value) { inp.value = dmy(nat.value); inp.dispatchEvent(new Event('change')); } };
+  wrap.append(inp, btn, nat);
+  return wrap;
+}
+// '' for empty input, null for invalid, else ISO. Accepts d/m/yyyy with / . or - separators.
+function parseDmy(s) {
+  s = (s || '').trim();
+  if (!s) return '';
+  const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s);
+  if (!m) return null;
+  const [d, mo, y] = [+m[1], +m[2], +m[3]];
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
 
 async function api(path, method, body) {
   const r = await fetch(path, {
@@ -304,7 +340,7 @@ function flush() {
 
 function render() {
   $('#workday').value = day.workday;
-  $('#date').textContent = day.date || '';
+  $('#date').textContent = dmy(day.date);
   const list = $('#list');
   list.innerHTML = '';
   if (!day.entries.length) {
@@ -428,22 +464,26 @@ function previewNodes(p) {
   return nodes;
 }
 
-// Resolves to the chosen YYYY-MM-DD date, or null if cancelled.
+// Resolves to the chosen date (ISO), or null if cancelled.
 async function confirmDay(p) {
   const dateRow = document.createElement('div');
   dateRow.style.cssText = 'display:flex; align-items:center; gap:10px; margin-bottom:10px';
   const lbl = document.createElement('span'); lbl.textContent = 'Log to date';
   const di = document.createElement('input');
-  di.type = 'date'; di.value = p.date; di.max = day.date; di.style.width = 'auto';
+  di.placeholder = 'dd/mm/yyyy'; di.value = dmy(p.date); di.autocomplete = 'off'; di.style.width = '170px';
   dateRow.append(lbl, di);
+  withPicker(di, () => day.date);
   const rest = document.createElement('div');
   rest.replaceChildren(...previewNodes(p));
   let chosen = p.date;
   di.onchange = async () => {
-    if (!di.value) { di.value = chosen; return; }
+    const iso = parseDmy(di.value);
+    if (!iso) { di.classList.add('bad'); rest.replaceChildren(Object.assign(document.createElement('div'), { className: 'adj', textContent: 'Invalid date, use dd/mm/yyyy' })); $('#mok').disabled = true; return; }
+    di.classList.remove('bad');
     try {
-      const np = await api('/api/day/preview', 'POST', { date: di.value });
+      const np = await api('/api/day/preview', 'POST', { date: iso });
       chosen = np.date;
+      di.value = dmy(np.date);
       rest.replaceChildren(...previewNodes(np));
       $('#mok').disabled = false;
     } catch (e) {
@@ -528,18 +568,22 @@ function today() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+withPicker($('#start'));
+withPicker($('#due'));
 function resetForm() {
-  $('#summary').value = ''; $('#estimate').value = ''; $('#due').value = ''; $('#start').value = today();
+  $('#summary').value = ''; $('#estimate').value = ''; $('#due').value = ''; $('#start').value = dmy(today());
 }
 
 $('#create-btn').onclick = async () => {
   const btn = $('#create-btn');
   btn.disabled = true;
   try {
+    const start = parseDmy($('#start').value), due = parseDmy($('#due').value);
+    if (start === null || due === null) throw new Error('Invalid date, use dd/mm/yyyy');
     const r = await api('/api/tasks', 'POST', {
       summary: $('#summary').value, project: project.get(), parent: parentCombo.get(),
       assignee: assignee.get(), reporter: reporter.get(),
-      estimate: $('#estimate').value, start: $('#start').value, due: $('#due').value,
+      estimate: $('#estimate').value, start, due,
     });
     const span = document.createElement('span');
     const a = document.createElement('a');
@@ -587,7 +631,7 @@ async function loadWeeks() {
     const sep = i => (i === 6 || i === 12) ? 'tot' : '';   // total columns
     const tbl = document.createElement('table');
     const head = document.createElement('thead'), body = document.createElement('tbody'), foot = document.createElement('tfoot');
-    tr(head, [' ', { span: 6, text: `Previous week ${weeks[0].from} – ${weeks[0].to}` }, { span: 6, text: `Current week ${weeks[1].from} – ${weeks[1].to}` }], 'th');
+    tr(head, [' ', { span: 6, text: `Previous week ${dmy(weeks[0].from)} – ${dmy(weeks[0].to)}` }, { span: 6, text: `Current week ${dmy(weeks[1].from)} – ${dmy(weeks[1].to)}` }], 'th');
     tr(head, ['Task', ...days, 'Σ', ...days, 'Σ'], 'th', sep);
     const cells = (w, k) => { const d = w ? w.days : zero; return [...d.map(m => fmt(m) || '–'), fmt(w ? w.total : 0) || '–']; };
     for (const r of rows) {
