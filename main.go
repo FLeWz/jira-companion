@@ -497,8 +497,12 @@ func (a *app) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("project required"))
 		return
 	}
+	if in.Start == "" || in.Due == "" {
+		writeErr(w, 400, errors.New("start date and due date required (dd/mm/yyyy)"))
+		return
+	}
 	for _, d := range []string{in.Start, in.Due} {
-		if d != "" && !validDate(d) {
+		if !validDate(d) {
 			writeErr(w, 400, fmt.Errorf("invalid date %q", d))
 			return
 		}
@@ -538,19 +542,27 @@ func (a *app) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if est > 0 {
 		f["timetracking"] = map[string]any{"originalEstimate": FormatMinutes(est)}
 	}
-	if in.Due != "" {
+	// Projects may require "Original Start/Due Date" custom fields; fall back to
+	// the standard due date / "Start date" where they do not exist.
+	origStart := a.jira.FieldID("Original Start Date")
+	origDue := a.jira.FieldID("Original Due Date")
+	switch {
+	case origDue != "":
+		f[origDue] = in.Due
+	case in.Due != "":
 		f["duedate"] = in.Due
 	}
-	startField := ""
-	if in.Start != "" {
-		if startField = a.jira.StartDateField(); startField != "" {
-			f[startField] = in.Start
-		}
+	startField := origStart
+	if startField == "" && in.Start != "" {
+		startField = a.jira.FieldID("Start date")
+	}
+	if startField != "" && in.Start != "" {
+		f[startField] = in.Start
 	}
 
 	warning := ""
 	key, err := a.jira.CreateIssue(f)
-	if err != nil && startField != "" && strings.Contains(err.Error(), startField) {
+	if err != nil && startField != "" && startField != origStart && strings.Contains(err.Error(), startField) {
 		delete(f, startField)
 		warning = "start date not on project's create screen, skipped"
 		key, err = a.jira.CreateIssue(f)

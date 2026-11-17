@@ -19,10 +19,9 @@ type Jira struct {
 	auth string
 	hc   *http.Client
 
-	mu         sync.Mutex
-	me         *Ref
-	startField string
-	startDone  bool
+	mu     sync.Mutex
+	me     *Ref
+	fields map[string]string // lower-case field name -> id
 }
 
 func NewJira(base, email, token string) *Jira {
@@ -220,25 +219,29 @@ func (j *Jira) SearchUsers(q, project string, assignable bool) ([]Ref, error) {
 	return out, nil
 }
 
-// StartDateField finds the custom field id of "Start date" ("" if none).
-func (j *Jira) StartDateField() string {
+// FieldID returns the id of the first field whose name matches one of names
+// (case-insensitive, tried in order), or "" if none exists.
+func (j *Jira) FieldID(names ...string) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.startDone {
-		return j.startField
-	}
-	var fs []struct{ ID, Name string }
-	if err := j.do("GET", "/rest/api/3/field", nil, nil, &fs); err != nil {
-		return ""
-	}
-	j.startDone = true
-	for _, f := range fs {
-		if strings.EqualFold(f.Name, "Start date") {
-			j.startField = f.ID
-			break
+	if j.fields == nil {
+		var fs []struct{ ID, Name string }
+		if err := j.do("GET", "/rest/api/3/field", nil, nil, &fs); err != nil {
+			return ""
+		}
+		j.fields = map[string]string{}
+		for _, f := range fs {
+			if _, ok := j.fields[strings.ToLower(f.Name)]; !ok {
+				j.fields[strings.ToLower(f.Name)] = f.ID
+			}
 		}
 	}
-	return j.startField
+	for _, n := range names {
+		if id := j.fields[strings.ToLower(n)]; id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 type issueType struct {
