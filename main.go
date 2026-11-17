@@ -607,7 +607,7 @@ func (a *app) handleCreate(w http.ResponseWriter, r *http.Request) {
 	a.st.Rollover()
 	rm := &a.st.S.Remember
 	rm.Project, rm.Parent, rm.Assignee, rm.Reporter = in.Project, in.Parent, in.Assignee, in.Reporter
-	a.st.S.Entries = append(a.st.S.Entries, Entry{ID: NewID(), Key: key, Summary: in.Summary})
+	a.st.S.Entries = append(a.st.S.Entries, Entry{ID: NewID(), Key: key, Summary: in.Summary, Manual: true})
 	if err := a.st.Save(); err != nil {
 		log.Printf("save: %v", err)
 	}

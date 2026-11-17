@@ -580,6 +580,7 @@ $('#create-btn').onclick = async () => {
   try {
     const start = parseDmy($('#start').value), due = parseDmy($('#due').value);
     if (start === null || due === null) throw new Error('Invalid date, use dd/mm/yyyy');
+    await flush(); // push pending edits first: the server appends the new task to the day
     const r = await api('/api/tasks', 'POST', {
       summary: $('#summary').value, project: project.get(), parent: parentCombo.get(),
       assignee: assignee.get(), reporter: reporter.get(),
@@ -591,8 +592,7 @@ $('#create-btn').onclick = async () => {
     span.append('Created ', a, r.warning ? ' — ' + r.warning : '');
     toast(span, true, 6000);
     resetForm();
-    await flush();
-    await loadDay();
+    await loadDay(); // shows the new task in the today pane
     $('#summary').focus();
   } catch (e) { toast(e.message, false); }
   btn.disabled = false;
