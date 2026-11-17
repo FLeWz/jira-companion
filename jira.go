@@ -154,13 +154,14 @@ func jqlStr(s string) string {
 }
 
 // BuildIssueJQL builds a search for issues by key or summary prefix words.
-func BuildIssueJQL(q, project string, noSubtasks bool) string {
+// With epicsOnly, only epics (the valid parents for new tasks) are returned.
+func BuildIssueJQL(q, project string, epicsOnly bool) string {
 	var conds []string
 	if project != "" && projRe.MatchString(project) {
 		conds = append(conds, "project = "+jqlStr(project))
 	}
-	if noSubtasks {
-		conds = append(conds, "issuetype not in subTaskIssueTypes()")
+	if epicsOnly {
+		conds = append(conds, "issuetype = Epic")
 	}
 	q = strings.TrimSpace(q)
 	var text []string
@@ -176,6 +177,9 @@ func BuildIssueJQL(q, project string, noSubtasks bool) string {
 		conds = append(conds, strings.Join(text, " AND "))
 	}
 	jql := strings.Join(conds, " AND ")
+	if epicsOnly {
+		return jql + " ORDER BY key ASC" // stable WP order, not recency
+	}
 	return jql + " ORDER BY updated DESC"
 }
 

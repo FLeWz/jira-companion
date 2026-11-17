@@ -106,7 +106,7 @@
     <label>Summary</label>
     <input id="summary" autocomplete="off">
     <label>Project</label><div id="project"></div>
-    <label>Parent</label><div id="parent"></div>
+    <label>Parent epic</label><div id="parent"></div>
     <div class="grid2">
       <div><label>Assignee</label><div id="assignee"></div></div>
       <div><label>Reporter</label><div id="reporter"></div></div>
@@ -548,10 +548,10 @@ const pickedProject = () => { const p = project.get(); return p ? p.id : ''; };
 const project = Combo($('#project'), {
   placeholder: 'Search project…',
   search: t => api('/api/search/projects?q=' + q(t)),
-  onChange: () => { parentCombo.set(null); assignee.set(meRef()); },
+  onChange: () => { assignee.set(meRef()); },
 });
 const parentCombo = Combo($('#parent'), {
-  placeholder: 'Search parent (optional)…', clearable: true,
+  placeholder: 'Search parent epic (any project)…', clearable: true,
   search: t => api(`/api/search/issues?parents=1&project=${q(pickedProject())}&q=${q(t)}`),
 });
 async function userSearch(kind, t) {

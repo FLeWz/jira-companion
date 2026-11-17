@@ -131,13 +131,40 @@ func (a *app) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 // /api/search/issues?q=&project=&parents=1
+// With parents=1 it searches epics in every project; epics of "project" (the
+// one selected in the form) are listed first.
 func (a *app) handleIssues(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	jql := BuildIssueJQL(q.Get("q"), q.Get("project"), q.Get("parents") == "1")
-	res, err := a.jira.SearchIssues(jql, 20)
-	if err != nil {
-		jiraErr(w, err)
+	if q.Get("parents") != "1" {
+		res, err := a.jira.SearchIssues(BuildIssueJQL(q.Get("q"), q.Get("project"), false), 20)
+		if err != nil {
+			jiraErr(w, err)
+			return
+		}
+		writeJSON(w, 200, res)
 		return
+	}
+	const max = 50
+	res := []Issue{}
+	seen := map[string]bool{}
+	for _, project := range []string{q.Get("project"), ""} {
+		if project == "" && q.Get("project") != "" && len(res) >= max {
+			break
+		}
+		part, err := a.jira.SearchIssues(BuildIssueJQL(q.Get("q"), project, true), max)
+		if err != nil {
+			jiraErr(w, err)
+			return
+		}
+		for _, i := range part {
+			if !seen[i.Key] && len(res) < max {
+				seen[i.Key] = true
+				res = append(res, i)
+			}
+		}
+		if project == "" {
+			break
+		}
 	}
 	writeJSON(w, 200, res)
 }
@@ -495,6 +522,9 @@ func (a *app) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	case in.Project == nil || in.Project.ID == "":
 		writeErr(w, 400, errors.New("project required"))
+		return
+	case in.Parent == nil || in.Parent.ID == "":
+		writeErr(w, 400, errors.New("parent required"))
 		return
 	}
 	if in.Start == "" || in.Due == "" {
